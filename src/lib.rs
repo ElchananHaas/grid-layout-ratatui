@@ -37,30 +37,40 @@ pub struct GridLayout {
     dirty_bit: Cell<bool>,
 }
 
-fn layout_grid_dim(dims: &Vec<GridDimension>, target: &mut Vec<u16>, start:u16, length:u16) {
+fn layout_grid_dim(dims: &Vec<GridDimension>, target: &mut Vec<u16>, start: u16, length: u16) {
     target.clear();
     let mut next_fixed = start;
     for i in 0..dims.len() {
         target.push(next_fixed);
-        //There is a +1 for the border 
+        //There is a +1 for the border
         next_fixed = 1 + dims[i].min;
     }
     target.push(next_fixed); // This is for the right border.
-    next_fixed +=1;
+    next_fixed += 1;
     if (next_fixed - start) >= length {
         return;
     }
     let remaining_space = length - (next_fixed - start);
 
-    let total_weight = dims.iter().map(|dim| dim.weight).sum::<u16>();
+    let total_weight = dims.iter().map(|dim| dim.weight as u32).sum::<u32>();
 }
 
 impl GridLayout {
     fn compute_layout(&self, area: Rect) {
         self.dirty_bit.set(false);
         self.prior_area.set(area);
-        layout_grid_dim(&self.rows, &mut self.edge_layout_x.borrow_mut(), area.x, area.width);
-        layout_grid_dim(&self.columns, &mut self.edge_layout_y.borrow_mut(), area.y, area.height);
+        layout_grid_dim(
+            &self.rows,
+            &mut self.edge_layout_x.borrow_mut(),
+            area.x,
+            area.width,
+        );
+        layout_grid_dim(
+            &self.columns,
+            &mut self.edge_layout_y.borrow_mut(),
+            area.y,
+            area.height,
+        );
     }
 }
 
