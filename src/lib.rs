@@ -1,9 +1,9 @@
 use std::{
-    cell::{Cell, RefCell},
+    cell::{RefCell},
     collections::BinaryHeap,
 };
 
-use ratatui::{buffer::Buffer, layout::Rect, widgets::Widget};
+use ratatui::{buffer::{Buffer, Cell}, layout::Rect, symbols::border, widgets::Widget};
 
 pub fn add(left: u64, right: u64) -> u64 {
     left + right
@@ -33,8 +33,10 @@ pub struct GridLayout {
     edge_layout_x: RefCell<Vec<u16>>,
     edge_layout_y: RefCell<Vec<u16>>,
     grid_points: RefCell<Vec<Vec<GridPoint>>>,
-    prior_area: Cell<Rect>,
-    dirty_bit: Cell<bool>,
+    //Fully qualified to not conflict with Ratatui cell.
+    prior_area: std::cell::Cell<Rect>,
+    dirty_bit: std::cell::Cell<bool>,
+    border_set: border::Set,
 }
 
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
@@ -138,6 +140,34 @@ impl GridLayout {
             }
         }
     }
+
+    fn draw_edges(&self, area: Rect, buf: &mut Buffer) {
+        let edge_layout_x = &*self.edge_layout_x.borrow();
+        let edge_layout_y = &*self.edge_layout_y.borrow();
+        let grid_points = &*self.grid_points.borrow();
+        //Draw the horizontal lines
+        for i in 0..edge_layout_x.len() - 1 {
+            for j in 0..edge_layout_y.len() {
+                if grid_points[i][j].visible && grid_points[i+1][j].visible {
+                    let y = edge_layout_y[j];
+                    for x in (edge_layout_x[i] + 1)..(edge_layout_x[i+1]) {
+                        buf[(x, y)] = Cell::new(self.border_set.horizontal_top);
+                    }
+                }
+            }
+        }
+        //Draw the vertical lines
+        for i in 0..edge_layout_x.len() {
+            for j in 0..edge_layout_y.len() - 1 {
+                if grid_points[i][j].visible && grid_points[i][j+1].visible {
+                    let x = edge_layout_x[i];
+                    for y in (edge_layout_y[j] + 1)..(edge_layout_y[j+1]) {
+                        buf[(x, y)] = Cell::new(self.border_set.vertical_left);
+                    }
+                }
+            }
+        }
+    }
 }
 
 impl Widget for &GridLayout {
@@ -148,6 +178,7 @@ impl Widget for &GridLayout {
         if self.dirty_bit.get() || area != self.prior_area.get() {
             self.compute_layout(area);
         }
+        self.draw_edges(area, buf);
         //TODO!
     }
 }
@@ -157,7 +188,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn it_works() {
+    fn render_test() {
+        let mut buffer = Buffer::empty(Rect::new(0, 0, 20, 20));
         let result = add(2, 2);
         assert_eq!(result, 4);
     }
