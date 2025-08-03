@@ -1,4 +1,4 @@
-use std::cell::{Cell, RefCell};
+use std::{cell::{Cell, RefCell}, collections::BinaryHeap};
 
 use ratatui::{
     buffer::Buffer,
@@ -37,6 +37,11 @@ pub struct GridLayout {
     dirty_bit: Cell<bool>,
 }
 
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
+struct WeightItem {
+    pub weight: i32,
+    pub index: usize
+}
 fn layout_grid_dim(dims: &Vec<GridDimension>, target: &mut Vec<u16>, start: u16, length: u16) {
     target.clear();
     let mut next_fixed = start;
@@ -47,13 +52,47 @@ fn layout_grid_dim(dims: &Vec<GridDimension>, target: &mut Vec<u16>, start: u16,
     }
     target.push(next_fixed); // This is for the right border.
     next_fixed += 1;
+    //If the entire grid is taken up by borders, just return.
     if (next_fixed - start) >= length {
         return;
     }
-    let remaining_space = length - (next_fixed - start);
-
-    let total_weight = dims.iter().map(|dim| dim.weight as u32).sum::<u32>();
+    //This bit allocates the remaining space by tracking the difference between the ideal allocation
+    //and the actual allocation. Due to fractions, matching the ideal allocation may be impossible.
+    //This uses a priority queue to get as close as possible.
+    let remaining_space = (length - (next_fixed - start)) as i32;
+    let total_weight = dims.iter().map(|dim| dim.weight as i32).sum::<i32>();
+    let mut weights_heap: BinaryHeap<WeightItem> = BinaryHeap::new();
+    for (i, weight) in dims.iter().map(|dim| dim.weight as i32).enumerate() {
+        weights_heap.push(WeightItem{
+            //Multiply by remaining space to make sure weights are greater than remaining space.
+            weight: weight * remaining_space,
+            index: i
+        });
+    }
+    let mut adjustment = vec![0; dims.len()];
+    for _ in 0..remaining_space {
+        let Some(mut biggest) = weights_heap.pop() else {return};
+        //Since each weight was multiplied by remaining_space, there is now total_weight*remaining_space weight.
+        //So since there are remaining_space allocations each allocation costs total_weight
+        if biggest.weight > total_weight {
+            //First, do all of the positive allocations using division to be fast
+            let amount = biggest.weight / total_weight;
+            adjustment[biggest.index] += amount;
+            biggest.weight -= total_weight * amount;
+        } else {
+            //This allocates the remaining pixels
+            biggest.weight -= total_weight;
+            adjustment[biggest.index] += 1;
+        }
+        weights_heap.push(biggest);
+    }
+    let mut acc = 0;
+    for i in 0..adjustment.len() {
+        acc += adjustment[i];
+        target[i] += acc as u16;
+    }
 }
+
 
 impl GridLayout {
     fn compute_layout(&self, area: Rect) {
