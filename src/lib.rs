@@ -1,4 +1,7 @@
-use std::{cell::{Cell, RefCell}, collections::BinaryHeap};
+use std::{
+    cell::{Cell, RefCell},
+    collections::BinaryHeap,
+};
 
 use ratatui::{
     buffer::Buffer,
@@ -18,10 +21,11 @@ pub struct GridDimension {
 
 //There is 1 more grid point then cell because
 //of left and right borders.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct GridPoint {
     //If there is a widget that spans this grid point
     //it is occluded.
-    occluded: bool,
+    visible: bool,
 }
 pub struct GridLayout {
     columns: Vec<GridDimension>,
@@ -40,7 +44,7 @@ pub struct GridLayout {
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
 struct WeightItem {
     pub weight: i32,
-    pub index: usize
+    pub index: usize,
 }
 fn layout_grid_dim(dims: &Vec<GridDimension>, target: &mut Vec<u16>, start: u16, length: u16) {
     target.clear();
@@ -63,36 +67,41 @@ fn layout_grid_dim(dims: &Vec<GridDimension>, target: &mut Vec<u16>, start: u16,
     let total_weight = dims.iter().map(|dim| dim.weight as i32).sum::<i32>();
     let mut weights_heap: BinaryHeap<WeightItem> = BinaryHeap::new();
     for (i, weight) in dims.iter().map(|dim| dim.weight as i32).enumerate() {
-        weights_heap.push(WeightItem{
+        weights_heap.push(WeightItem {
             //Multiply by remaining space to make sure weights are greater than remaining space.
             weight: weight * remaining_space,
-            index: i
+            index: i,
         });
     }
     let mut adjustment = vec![0; dims.len()];
-    for _ in 0..remaining_space {
-        let Some(mut biggest) = weights_heap.pop() else {return};
+    let mut remaining_allocation = remaining_space;
+    while remaining_allocation > 0 {
+        let Some(mut biggest) = weights_heap.pop() else {
+            return;
+        };
         //Since each weight was multiplied by remaining_space, there is now total_weight*remaining_space weight.
         //So since there are remaining_space allocations each allocation costs total_weight
         if biggest.weight > total_weight {
             //First, do all of the positive allocations using division to be fast
             let amount = biggest.weight / total_weight;
+            remaining_allocation -= amount;
             adjustment[biggest.index] += amount;
             biggest.weight -= total_weight * amount;
         } else {
             //This allocates the remaining pixels
             biggest.weight -= total_weight;
             adjustment[biggest.index] += 1;
+            remaining_allocation -= 1;
         }
         weights_heap.push(biggest);
     }
+    assert!(remaining_allocation == 0);
     let mut acc = 0;
     for i in 0..adjustment.len() {
         acc += adjustment[i];
         target[i] += acc as u16;
     }
 }
-
 
 impl GridLayout {
     fn compute_layout(&self, area: Rect) {
@@ -110,6 +119,28 @@ impl GridLayout {
             area.y,
             area.height,
         );
+        let grid_points = &mut *self.grid_points.borrow_mut();
+
+        let edge_layout_x = &*self.edge_layout_x.borrow();
+        let edge_layout_y = &*self.edge_layout_y.borrow();
+        *grid_points =
+            vec![vec![GridPoint { visible: true }; edge_layout_y.len()]; edge_layout_x.len()];
+        for location in &self.widget_locations {
+            let location = location.intersection(Rect {
+                x: 0,
+                y: 0,
+                width: edge_layout_x.len() as u16,
+                height: edge_layout_y.len() as u16,
+            });
+            if location.right() <= 1 || location.bottom() <= 1 {
+                continue;
+            }
+            for i in (location.x + 1)..(location.right() - 1) {
+                for j in (location.y + 1)..(location.bottom() - 1) {
+                    grid_points[i as usize][j as usize].visible = false;
+                }
+            }
+        }
     }
 }
 
