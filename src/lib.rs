@@ -3,11 +3,7 @@ use std::{
     collections::BinaryHeap,
 };
 
-use ratatui::{
-    buffer::Buffer,
-    layout::{Alignment, Rect},
-    widgets::Widget,
-};
+use ratatui::{buffer::Buffer, layout::Rect, widgets::Widget};
 
 pub fn add(left: u64, right: u64) -> u64 {
     left + right
