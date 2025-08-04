@@ -103,7 +103,7 @@ fn layout_grid_dim(dims: &Vec<GridDimension>, target: &mut Vec<u16>, start: u16,
     }
 }
 
-fn corner_token(set: &border::Set, top: bool, right: bool, bottom: bool, left: bool) -> &str {
+fn corner_symbol(top: bool, right: bool, bottom: bool, left: bool) -> &'static str {
     match (top, right, bottom, left) {
         (true, true, true, true) => NORMAL.cross,
         (true, true, true, false) => NORMAL.vertical_right,
@@ -123,6 +123,7 @@ fn corner_token(set: &border::Set, top: bool, right: bool, bottom: bool, left: b
         (false, false, false, false) => &" ",
     }
 }
+
 impl GridLayout {
     fn compute_layout(&self, area: Rect) {
         self.dirty_bit.set(false);
@@ -196,7 +197,17 @@ impl GridLayout {
         let edge_layout_y = &*self.edge_layout_y.borrow();
         let grid_points = &*self.grid_points.borrow();
         for i in 0..edge_layout_x.len() {
-            for j in 0..edge_layout_y.len() {}
+            for j in 0..edge_layout_y.len() {
+                if !grid_points[i][j].visible {
+                    continue;
+                }
+                let top = j > 0 && grid_points[i][j - 1].visible;
+                let right = grid_points.get(i + 1).is_some_and(|row| row[j - 1].visible);
+                let bottom = grid_points[i].get(j + 1).is_some_and(|point| point.visible);
+                let left = i > 0 && grid_points[i - 1][j].visible;
+                let symbol = corner_symbol(top, right, bottom, left);
+                buf[(edge_layout_x[i], edge_layout_y[j])] = Cell::new(symbol)
+            }
         }
     }
 }
@@ -210,6 +221,7 @@ impl Widget for &GridLayout {
             self.compute_layout(area);
         }
         self.draw_edges(area, buf);
+        self.draw_corners(area, buf);
         //TODO!
     }
 }
