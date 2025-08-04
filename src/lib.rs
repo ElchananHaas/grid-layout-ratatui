@@ -1,9 +1,11 @@
-use std::{
-    cell::{RefCell},
-    collections::BinaryHeap,
-};
+use std::{cell::RefCell, collections::BinaryHeap};
 
-use ratatui::{buffer::{Buffer, Cell}, layout::Rect, symbols::border, widgets::Widget};
+use ratatui::{
+    buffer::{Buffer, Cell},
+    layout::Rect,
+    symbols::{border, line::NORMAL},
+    widgets::Widget,
+};
 
 pub fn add(left: u64, right: u64) -> u64 {
     left + right
@@ -101,6 +103,26 @@ fn layout_grid_dim(dims: &Vec<GridDimension>, target: &mut Vec<u16>, start: u16,
     }
 }
 
+fn corner_token(set: &border::Set, top: bool, right: bool, bottom: bool, left: bool) -> &str {
+    match (top, right, bottom, left) {
+        (true, true, true, true) => NORMAL.cross,
+        (true, true, true, false) => NORMAL.vertical_right,
+        (true, true, false, true) => NORMAL.horizontal_up,
+        (true, true, false, false) => NORMAL.bottom_left,
+        (true, false, true, true) => NORMAL.vertical_left,
+        (true, false, true, false) => NORMAL.vertical,
+        (true, false, false, true) => NORMAL.bottom_right,
+        (true, false, false, false) => &"╵",
+        (false, true, true, true) => NORMAL.horizontal_down,
+        (false, true, true, false) => NORMAL.top_left,
+        (false, true, false, true) => NORMAL.horizontal,
+        (false, true, false, false) => &"╶",
+        (false, false, true, true) => NORMAL.top_right,
+        (false, false, true, false) => &"╷",
+        (false, false, false, true) => &"╴",
+        (false, false, false, false) => &" ",
+    }
+}
 impl GridLayout {
     fn compute_layout(&self, area: Rect) {
         self.dirty_bit.set(false);
@@ -148,9 +170,9 @@ impl GridLayout {
         //Draw the horizontal lines
         for i in 0..edge_layout_x.len() - 1 {
             for j in 0..edge_layout_y.len() {
-                if grid_points[i][j].visible && grid_points[i+1][j].visible {
+                if grid_points[i][j].visible && grid_points[i + 1][j].visible {
                     let y = edge_layout_y[j];
-                    for x in (edge_layout_x[i] + 1)..(edge_layout_x[i+1]) {
+                    for x in (edge_layout_x[i] + 1)..(edge_layout_x[i + 1]) {
                         buf[(x, y)] = Cell::new(self.border_set.horizontal_top);
                     }
                 }
@@ -159,13 +181,22 @@ impl GridLayout {
         //Draw the vertical lines
         for i in 0..edge_layout_x.len() {
             for j in 0..edge_layout_y.len() - 1 {
-                if grid_points[i][j].visible && grid_points[i][j+1].visible {
+                if grid_points[i][j].visible && grid_points[i][j + 1].visible {
                     let x = edge_layout_x[i];
-                    for y in (edge_layout_y[j] + 1)..(edge_layout_y[j+1]) {
+                    for y in (edge_layout_y[j] + 1)..(edge_layout_y[j + 1]) {
                         buf[(x, y)] = Cell::new(self.border_set.vertical_left);
                     }
                 }
             }
+        }
+    }
+
+    fn draw_corners(&self, area: Rect, buf: &mut Buffer) {
+        let edge_layout_x = &*self.edge_layout_x.borrow();
+        let edge_layout_y = &*self.edge_layout_y.borrow();
+        let grid_points = &*self.grid_points.borrow();
+        for i in 0..edge_layout_x.len() {
+            for j in 0..edge_layout_y.len() {}
         }
     }
 }
