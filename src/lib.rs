@@ -7,9 +7,7 @@ use ratatui::{
     widgets::Widget,
 };
 
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct GridDimension {
     ///The minimum dimension.
     min: u16,
@@ -38,7 +36,6 @@ pub struct GridLayout {
     //Fully qualified to not conflict with Ratatui cell.
     prior_area: std::cell::Cell<Rect>,
     dirty_bit: std::cell::Cell<bool>,
-    border_set: border::Set,
 }
 
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
@@ -48,34 +45,28 @@ struct WeightItem {
 }
 fn layout_grid_dim(dims: &Vec<GridDimension>, target: &mut Vec<u16>, start: u16, length: u16) {
     target.clear();
-    let mut next_fixed = start;
+    let mut sizes: Vec<i32> = Vec::new();
     for i in 0..dims.len() {
-        target.push(next_fixed);
         //There is a +1 for the border
-        next_fixed = 1 + dims[i].min;
+        sizes.push(1 + dims[i].min as i32);
     }
-    target.push(next_fixed); // This is for the right border.
-    next_fixed += 1;
-    //If the entire grid is taken up by borders, just return.
-    if (next_fixed - start) >= length {
-        return;
-    }
+    let taken_up: i32 = sizes.iter().sum();
+    //Minus 1 for the right border
+    let mut allocate = (length as i32) - taken_up - 1;
+    let total_weight = dims.iter().map(|dim| dim.weight as i32).sum::<i32>();
     //This bit allocates the remaining space by tracking the difference between the ideal allocation
     //and the actual allocation. Due to fractions, matching the ideal allocation may be impossible.
     //This uses a priority queue to get as close as possible.
-    let remaining_space = (length - (next_fixed - start)) as i32;
-    let total_weight = dims.iter().map(|dim| dim.weight as i32).sum::<i32>();
     let mut weights_heap: BinaryHeap<WeightItem> = BinaryHeap::new();
     for (i, weight) in dims.iter().map(|dim| dim.weight as i32).enumerate() {
         weights_heap.push(WeightItem {
-            //Multiply by remaining space to make sure weights are greater than remaining space.
-            weight: weight * remaining_space,
+            //There are (total_weight*allocate) tokens. Each space costs
+            //total_weight tokens. The min is already allocated, so subtract it.
+            weight: weight * allocate - (total_weight * (dims[i].min as i32)),
             index: i,
         });
     }
-    let mut adjustment = vec![0; dims.len()];
-    let mut remaining_allocation = remaining_space;
-    while remaining_allocation > 0 {
+    while allocate > 0 {
         let Some(mut biggest) = weights_heap.pop() else {
             return;
         };
@@ -84,23 +75,26 @@ fn layout_grid_dim(dims: &Vec<GridDimension>, target: &mut Vec<u16>, start: u16,
         if biggest.weight > total_weight {
             //First, do all of the positive allocations using division to be fast
             let amount = biggest.weight / total_weight;
-            remaining_allocation -= amount;
-            adjustment[biggest.index] += amount;
+            allocate -= amount;
+            sizes[biggest.index] += amount;
             biggest.weight -= total_weight * amount;
         } else {
             //This allocates the remaining pixels
             biggest.weight -= total_weight;
-            adjustment[biggest.index] += 1;
-            remaining_allocation -= 1;
+            sizes[biggest.index] += 1;
+            allocate -= 1;
         }
         weights_heap.push(biggest);
     }
-    assert!(remaining_allocation == 0);
-    let mut acc = 0;
-    for i in 0..adjustment.len() {
-        acc += adjustment[i];
-        target[i] += acc as u16;
+    assert!(allocate <= 0);
+    dbg!(&sizes);
+    let mut acc = start;
+    for i in 0..sizes.len() {
+        target.push(acc as u16);
+        acc += sizes[i] as u16;
     }
+    //For the right border.
+    target.push(acc as u16);
 }
 
 fn corner_symbol(top: bool, right: bool, bottom: bool, left: bool) -> &'static str {
@@ -174,7 +168,7 @@ impl GridLayout {
                 if grid_points[i][j].visible && grid_points[i + 1][j].visible {
                     let y = edge_layout_y[j];
                     for x in (edge_layout_x[i] + 1)..(edge_layout_x[i + 1]) {
-                        buf[(x, y)] = Cell::new(self.border_set.horizontal_top);
+                        buf.cell_mut((x, y)).map(|c| *c = Cell::new(NORMAL.horizontal));
                     }
                 }
             }
@@ -185,7 +179,7 @@ impl GridLayout {
                 if grid_points[i][j].visible && grid_points[i][j + 1].visible {
                     let x = edge_layout_x[i];
                     for y in (edge_layout_y[j] + 1)..(edge_layout_y[j + 1]) {
-                        buf[(x, y)] = Cell::new(self.border_set.vertical_left);
+                        buf.cell_mut((x, y)).map(|c| *c = Cell::new(NORMAL.vertical));
                     }
                 }
             }
@@ -202,12 +196,35 @@ impl GridLayout {
                     continue;
                 }
                 let top = j > 0 && grid_points[i][j - 1].visible;
-                let right = grid_points.get(i + 1).is_some_and(|row| row[j - 1].visible);
+                let right = grid_points.get(i + 1).is_some_and(|row| row[j].visible);
                 let bottom = grid_points[i].get(j + 1).is_some_and(|point| point.visible);
                 let left = i > 0 && grid_points[i - 1][j].visible;
                 let symbol = corner_symbol(top, right, bottom, left);
-                buf[(edge_layout_x[i], edge_layout_y[j])] = Cell::new(symbol)
+                buf.cell_mut((edge_layout_x[i], edge_layout_y[j])).map(|c| *c = Cell::new(symbol));
             }
+        }
+    }
+    pub fn set_columns(&mut self, columns: Vec<GridDimension>) {
+        self.columns = columns;
+        self.dirty_bit.set(true);
+    }
+    pub fn set_rows(&mut self, rows: Vec<GridDimension>) {
+        self.rows = rows;
+        self.dirty_bit.set(true);
+    }
+    pub fn add_widget(&mut self, place: Rect) {
+        self.widget_locations.push(place);
+    }
+    pub fn new() -> Self {
+        GridLayout {
+            columns: vec![],
+            rows: vec![],
+            widget_locations: vec![],
+            edge_layout_x: RefCell::new(Vec::new()),
+            edge_layout_y: RefCell::new(Vec::new()),
+            grid_points: RefCell::new(Vec::new()),
+            prior_area: std::cell::Cell::new(Rect::ZERO),
+            dirty_bit: std::cell::Cell::new(true),
         }
     }
 }
@@ -222,7 +239,6 @@ impl Widget for &GridLayout {
         }
         self.draw_edges(area, buf);
         self.draw_corners(area, buf);
-        //TODO!
     }
 }
 
@@ -233,7 +249,21 @@ mod tests {
     #[test]
     fn render_test() {
         let mut buffer = Buffer::empty(Rect::new(0, 0, 20, 20));
-        let result = add(2, 2);
-        assert_eq!(result, 4);
+        let mut layout = GridLayout::new();
+        layout.set_columns(vec![GridDimension {
+            min: 0,
+            weight: 3
+        }, GridDimension {
+            min: 2,
+            weight: 1
+        }]);
+        layout.set_rows(vec![GridDimension {
+            min: 0,
+            weight: 1
+        }; 4]);
+        layout.render(*buffer.area(), &mut buffer);
+        dbg!(buffer);
+        dbg!(layout.edge_layout_x);
+        dbg!(layout.edge_layout_y);
     }
 }
